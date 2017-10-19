@@ -1,22 +1,20 @@
 import { Node } from './Node';
-import { BinaryReader } from '../BinaryReader';
-import { BinaryWriter } from '../BinaryWriter';
-import { Rect } from '../Rect';
-import { ServerClientPackets } from "../network";
-import { ReturnState } from "../network";
+import { BinaryReader } from '../common/BinaryReader';
+import { BinaryWriter } from '../common/BinaryWriter';
+import { Rect } from '../common/Rect';
+import { ServerClientPackets } from "../common/network";
+import { ReturnState } from "../common/network";
+import { v4 as uuidv4 } from "uuid";
+import { unparse } from 'uuid-parse';
+import { JobState } from "../common/job-state";
+import { EventEmitter } from 'events';
 
-enum JobState {
-    WAITING,
-    RUNNING,
-    COMPLETED,
-    CANCELLED,
-    ERROR
-}
-
-class Job {
+class Job extends EventEmitter {
     private _currentState: JobState = JobState.WAITING;
     private _blacklistNodes: Set<Node> = new Set<Node>();
-    private _progress: number;
+    private _progress: number = 0;
+    private _id: Buffer = new Buffer(16);
+    private _result?: Buffer;
 
     public node: Node | null = null;
 
@@ -27,39 +25,60 @@ class Job {
         this._iOnStateChange();
     }
 
+    private _setProgress(val: number): void {
+        this._progress = val;
+        this._iOnProgressChange();
+    }
+
     private _iOnStateChange(): void {
-        console.log('[job] #' + this.id + ' state ' + JobState[this.state]);
+        console.log('[job] ' + this.stringId + ' state ' + JobState[this.state]);
+        if (this.state === JobState.COMPLETED) this._setProgress(1);
+
+        this.emit('stateChange', this.state);
     }
 
     private _iOnProgressChange(): void {
-        // todo
+        console.log('[job] ' + this.stringId + ' progress ' + (this._progress * 100) + '%');
+
+        this.emit('progressChange', this._progress);
+    }
+
+    private _iOnCompleted(reader: BinaryReader): void {
+        const bufferSize = reader.readUInt32();
+        const imageBuffer = reader.readBytes(bufferSize);
+        this._result = imageBuffer;
+
+        this.emit('completed', imageBuffer);
     }
 
     private _iSend(): void {
         if (this.node == null) return;
         const writer = new BinaryWriter();
         writer.writeUInt32(ServerClientPackets.SEND);
-        writer.writeUInt32(this._id);
+        writer.writeBytes(this._id);
         this._rect.serialize(writer);
-        this.node._sendPacket(writer.toBuffer());
+        this.node.sendPacket(writer.toBuffer());
     }
 
     private _iCancel(): void {
         if (this.node == null) return;
         const writer = new BinaryWriter();
         writer.writeUInt32(ServerClientPackets.CANCEL);
-        writer.writeUInt32(this._id);
-        this.node._sendPacket(writer.toBuffer());
+        writer.writeBytes(this._id);
+        this.node.sendPacket(writer.toBuffer());
     }
 
-    private _finishProcess(state: ReturnState): void {
+    private _finishProcess(state: ReturnState, reader: BinaryReader): void {
         if (this.node == null) return;
         if (this.node.host == null) return;
 
         const host = this.node.host;
 
         switch (state) {
-            case ReturnState.OK: this._setState(JobState.COMPLETED); break;
+            case ReturnState.OK:
+                this._setState(JobState.COMPLETED);
+                this._iOnCompleted(reader);
+                break;
 
             case ReturnState.OTHER:
                 this._blacklistNodes.add(this.node);
@@ -73,38 +92,33 @@ class Job {
         }
     }
 
-    public constructor(private _id: number, private _rect: Rect) {
+    public constructor(private _rect: Rect) {
+        super();
+        uuidv4(null, this._id, 0);
     }
 
-    public get id(): number { return this._id; }
-    private get state(): JobState { return this._currentState; }
+    public get id(): Buffer { return this._id; }
+    public get stringId(): string { return unparse(this._id); }
+    public get state(): JobState { return this._currentState; }
+    public get rect(): Rect { return this._rect; }
+    public get result(): Buffer | undefined { return this._result; }
 
     public cancel(): void {
-        if (this.node == null) return;
         this._iCancel();
         this._setState(JobState.CANCELLED);
     }
 
     public _receiveReturn(reader: BinaryReader) {
         const state = reader.readUInt32() as ReturnState;
-
-        if (state === ReturnState.OK) {
-            //const blobSize = reader.readUInt32();
-            //const imageBlob = reader.readBytes(blobSize);
-            // todo: something with the image blob
-        }
-
-        this._finishProcess(state);
+        this._finishProcess(state, reader);
     }
 
     public _receiveProgress(reader: BinaryReader) {
-        this._progress = reader.readFloat();
-        this._iOnProgressChange();
+        this._setProgress(reader.readFloat());
     }
 
-    // todo: actually use the return value from this
     public _sendTo(node: Node): boolean {
-        if (this.node != null || this._blacklistNodes.has(node)) return false;
+        if (this.node != null || this._blacklistNodes.has(node) || this.state !== JobState.WAITING) return false;
 
         this.node = node;
         this._setState(JobState.RUNNING);

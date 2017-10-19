@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kesaa</title>
+    <link href="https://fonts.googleapis.com/css?family=PT+Sans:400,700" rel="stylesheet">
+    <style>
+        html, body {
+            margin: 0;
+            font-family: 'PT Sans', sans-serif;
+            background: #2c3e50;
+            color: #fff;
+        }
+
+        input {
+            font-family: monospace;
+            border: solid 1px #476481;
+            background: #395168;
+            color: #fff;
+        }
+        input:focus {
+            background: #476481
+        }
+
+        .flex {
+            display: flex;
+        }
+
+        .align-right {
+            text-align: right;
+        }
+
+        header {
+            align-items: baseline;
+            padding: 10px 20px;
+            background: #34495e;
+        }
+
+        header h1, header h2 {
+            margin: 0;
+        }
+
+        header h1 {
+            font-size: 2em;
+        }
+
+        header h2 {
+            font-size: 1em;
+            color: #89a3be;
+            margin-left: 10px;
+        }
+
+        section {
+            /*max-width: 900px;*/
+            padding: 0 20px;
+        }
+
+        section .flex {
+            margin-bottom: 10px;
+        }
+
+        section .flex > div {
+            background-color: #34495e;
+            padding: 10px;
+            border-radius: 10px;
+            margin-right: 10px;
+        }
+
+        section .flex > .pane-left {
+            flex-basis: 80%;
+        }
+
+        section .flex > .pane-right {
+            flex-basis: 20%;
+        }
+
+        section p {
+            margin: 0;
+        }
+
+        .big-button {
+            display: inline-block;
+            background-color: #395168;
+            margin-right: 10px;
+            padding: 10px;
+            border-radius: 10px;
+            border: 0;
+            color: #cdd8e3;
+            text-decoration: none;
+        }
+
+        .big-button:hover {
+            background-color: #476481;
+        }
+
+        #sceneText {
+            background-color: #395168;
+            border: solid 1px #476481;
+            color: #fff;
+
+            resize: vertical;
+            width: 100%;
+        }
+
+        #connectedClients {
+            background-color: #395168;
+            border: solid 1px #476481;
+            display: flex;
+            flex-direction: column;
+            font-family: monospace;
+        }
+
+        #connectedClients p {
+            padding: 5px 10px;
+            border-bottom: solid 1px #476481;
+        }
+
+        #connectedClients input {
+            border: none;
+            color: #fff;
+            font: inherit;
+            padding: 5px 10px;
+        }
+
+        #renderPreview {
+            display: inline-block;
+            border-right: solid 1px #476481;
+            border-bottom: solid 1px #476481;
+        }
+
+        .preview-row {
+            display: flex;
+        }
+
+        .render-cell {
+            position: relative;
+            border-top: solid 1px #476481;
+            border-left: solid 1px #476481;
+
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-content: center;
+            flex-direction: column;
+        }
+
+        .render-progress-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            background: #405b75;
+        }
+
+        .render-cell span {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+
+<header class="flex">
+    <h1>Kesaa</h1>
+    <h2>Distributed POV-Ray System</h2>
+</header>
+
+<section id="setupPane">
+    <h2>Setup</h2>
+
+    <div class="flex">
+        <div class="pane-left">
+            <p><label for="sceneText">POV file source:</label></p>
+            <textarea id="sceneText"></textarea>
+
+            <p><label>Image quality: <input id="imageQuality" type="range" min="0" max="11"/></label></p>
+            <p><label>Image width: <input id="imageWidth" type="number" value="1920" min="1"/></label></p>
+            <p><label>Image height: <input id="imageHeight" type="number" value="1080" min="1"/></label></p>
+            <p><label>Job rows: <input id="jobRows" type="number" value="10" min="1"/></label></p>
+            <p><label>Job columns: <input id="jobColumns" type="number" value="10" min="1"/></label></p>
+        </div>
+
+        <div class="pane-right">
+            <p>Connected clients:</p>
+
+            <div id="connectedClients">
+                <input id="addClient" type="text" placeholder="Add another..." pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$" style="display: none"/>
+            </div>
+        </div>
+    </div>
+
+    <div class="align-right">
+        <a class="big-button" href="#" id="setupContinue" style="display: none">Continue</a>
+    </div>
+</section>
+
+<section id="renderPane" style="display: none">
+    <h2>Render</h2>
+
+    <div>
+        <p>
+            <strong id="jobNum">100 jobs</strong> total, distributed among <strong id="clientNum">4 clients</strong>.
+            Each job is <strong id="sizeNum">192x108 pixels</strong>.
+        </p>
+    </div>
+
+    <div class="flex">
+        <div class="pane-left">
+            <p>Render preview:</p>
+            <div id="renderPreview">
+            </div>
+        </div>
+        <div class="pane-right">
+            <p>Client status:</p>
+            <pre id="clientStatus"></pre>
+            <a class="big-button" href="#" id="renderStart">Start</a>
+            <a class="big-button" href="#" id="renderCancel" style="display: none">Cancel</a>
+            <a class="big-button" href="#" id="renderSave" style="display: none">Save</a>
+            <a class="big-button" href="#" id="renderReturn" style="display: none">Return</a>
+        </div>
+    </div>
+
+</section>
+
+<script src="./bundle.js"></script>
+
+</body>
+</html>

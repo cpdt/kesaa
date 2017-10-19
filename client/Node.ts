@@ -1,10 +1,15 @@
-import { BinaryWriter } from '../BinaryWriter';
-import { BinaryReader } from '../BinaryReader';
+import { BinaryWriter } from '../common/BinaryWriter';
+import { BinaryReader } from '../common/BinaryReader';
 import { Socket } from 'net';
-import { ServerClientPackets, ClientServerPackets } from "../network";
-import { JobRunner } from "./JobRunner";
-import { Rect } from "../Rect";
-import { ReturnState } from "../network";
+import { ServerClientPackets, ClientServerPackets } from "../common/network";
+import {JobRunner, JobRunnerParams} from "./JobRunner";
+import { Rect } from "../common/Rect";
+import { ReturnState } from "../common/network";
+import { InitData } from "../common/InitData";
+import { unparse } from "uuid-parse";
+import { v4 as uuidv4 } from "uuid";
+import { writeFileSync } from 'fs';
+import * as mkdirp from 'mkdirp';
 
 interface JobData {
     runner: JobRunner;
@@ -13,7 +18,11 @@ interface JobData {
 
 class Node {
     private _lastBuffer: Buffer = new Buffer(0);
-    private _currentJobs: Map<number, JobData> = new Map<number, JobData>();
+    private _currentJobs: Map<string, JobData> = new Map<string, JobData>();
+    private _startQueue: number = 0;
+    private _hasStarted: boolean = false;
+    private _init: InitData;
+    private _filename: string;
 
     private _socketData(data: Buffer) {
         const concatData = Buffer.concat([this._lastBuffer, data]);
@@ -34,6 +43,12 @@ class Node {
 
         const messageType = reader.readUInt32() as ServerClientPackets;
         switch (messageType) {
+            case ServerClientPackets.INIT:
+                this._socketInit(reader);
+                break;
+            case ServerClientPackets.START:
+                this._socketStart(reader);
+                break;
             case ServerClientPackets.SEND:
                 this._socketSend(reader);
                 break;
@@ -41,10 +56,44 @@ class Node {
                 this._socketCancel(reader);
                 break;
         }
+
+        if (concatData.length > contentLength) {
+            this._socketData(concatData.slice(contentLength));
+        }
+    }
+
+    private _socketInit(reader: BinaryReader) {
+        const quality = reader.readUInt8();
+        const entireWidth = reader.readUInt32();
+        const entireHeight = reader.readUInt32();
+        const sourceLength = reader.readUInt32();
+        const sourceText = reader.readStringUtf8(sourceLength);
+        this._init = {
+            quality: quality,
+            source: sourceText,
+            entireWidth,
+            entireHeight
+        };
+
+        // write source text to local file
+        const sourceDir = __dirname + "/scenes/";
+        mkdirp.sync(sourceDir);
+        this._filename = sourceDir + uuidv4() + ".pov";
+        writeFileSync(this._filename, sourceText);
+    }
+
+    private _socketStart(reader: BinaryReader) {
+        console.log('Received start signal, sending ' + this._startQueue + ' borrow requests');
+
+        this._hasStarted = true;
+        for (let i = 0; i < this._startQueue; i++) {
+            this.borrow();
+        }
     }
 
     private _socketSend(reader: BinaryReader) {
-        const jobId = reader.readUInt32();
+        const jobId = reader.readBytes(16);
+        const strId = jobId.toString('ascii');
         const rect = Rect.deserialize(reader);
         const runner = this._getRunner();
         const data = {
@@ -52,16 +101,30 @@ class Node {
             writer: new BinaryWriter()
         };
 
-        this._currentJobs.set(jobId, data);
-        runner.run(rect, data.writer, (state: ReturnState) => this._finishJob(jobId, state));
+        this._currentJobs.set(strId, data);
+
+        const params: JobRunnerParams = {
+            jobId: unparse(jobId),
+            rect,
+            data: this._init,
+            filename: this._filename,
+            writer: data.writer
+        };
+
+        runner.run(
+            params,
+            (val: number) => this._sendProgress(jobId, strId, val),
+            (state: ReturnState) => this._finishJob(jobId, strId, state)
+        );
     }
 
     private _socketCancel(reader: BinaryReader) {
-        const jobId = reader.readUInt32();
-        if (!this._currentJobs.has(jobId)) return;
+        const jobId = reader.readBytes(16);
+        const strId = jobId.toString('ascii');
+        if (!this._currentJobs.has(strId)) return;
 
-        const jobData = this._currentJobs.get(jobId) as JobData;
-        this._currentJobs.delete(jobId);
+        const jobData = this._currentJobs.get(strId) as JobData;
+        this._currentJobs.delete(strId);
         jobData.runner.cancel();
     }
 
@@ -69,17 +132,31 @@ class Node {
         console.log('Oh no! Lost connection :(');
     }
 
-    private _finishJob(jobId: number, state: ReturnState) {
-        if (!this._currentJobs.has(jobId)) {
-            console.log('[warn] invalid job id ' + jobId);
+    private _sendProgress(jobId: Buffer, strId: string, val: number) {
+        if (!this._currentJobs.has(strId)) {
+            console.log('[warn] invalid job id ' + unparse(jobId));
             return;
         }
-        const jobData = this._currentJobs.get(jobId) as JobData;
-        this._currentJobs.delete(jobId);
 
-        const writer = new BinaryWriter(4 + jobData.writer.offset);
+        const writer = new BinaryWriter(24);
+        writer.writeUInt32(ClientServerPackets.PROGRESS);
+        writer.writeBytes(jobId);
+        writer.writeFloat(val);
+
+        this._sendPacket(writer.toBuffer());
+    }
+
+    private _finishJob(jobId: Buffer, strId: string, state: ReturnState) {
+        if (!this._currentJobs.has(strId)) {
+            console.log('[warn] invalid job id ' + unparse(jobId));
+            return;
+        }
+        const jobData = this._currentJobs.get(strId) as JobData;
+        this._currentJobs.delete(strId);
+
+        const writer = new BinaryWriter(24 + jobData.writer.offset);
         writer.writeUInt32(ClientServerPackets.RETURN);
-        writer.writeUInt32(jobId);
+        writer.writeBytes(jobId);
         writer.writeUInt32(state);
         writer.writeBytes(jobData.writer.toBuffer());
 
@@ -100,6 +177,11 @@ class Node {
     }
 
     public borrow() {
+        if (!this._hasStarted) {
+            this._startQueue++;
+            return;
+        }
+
         const writer = new BinaryWriter();
         writer.writeUInt32(ClientServerPackets.BORROW);
         this._sendPacket(writer.toBuffer());
