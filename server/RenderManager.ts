@@ -117,17 +117,7 @@ export class RenderManager {
         const stateData: StateData = { state: this._state };
         socket.emit('state', stateData);
 
-        // update per-state data
-        switch (this._state) {
-            /*case WebState.SETUP:
-                this._sendSetupUpdateTo(socket);
-                break;*/
-            case WebState.WAITING:
-            case WebState.RENDER:
-            case WebState.FINISHED:
-                this._sendRenderUpdateTo(socket);
-                break;
-        }
+        this._sendRenderUpdateTo(socket);
     }
 
     private _sendRenderUpdateTo(socket: EventEmitter): void {
