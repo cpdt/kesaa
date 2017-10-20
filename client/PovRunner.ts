@@ -41,6 +41,8 @@ export class PovRunner implements JobRunner {
         const matchRegex = /Rendered (\d+) of (\d+) pixels \((\d+)%\)/ig;
 
         this._povProcess.stderr.on('data', (chunk: Buffer) => {
+            if (!this._running) return;
+
             const strBuffer = chunk.toString();
             let match: string[] | null;
             while ((match = matchRegex.exec(strBuffer)) != null) {
