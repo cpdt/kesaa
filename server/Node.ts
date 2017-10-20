@@ -77,12 +77,14 @@ class Node {
         this._currentJobs.delete(strKey);
         job._receiveReturn(reader);
 
-        this._setState(this._waitingCount > 0 ? NodeState.WAITING : NodeState.IDLE);
+        if (this._currentJobs.size === 0) {
+            this._setState(this._waitingCount > 0 ? NodeState.WAITING : NodeState.IDLE);
+        }
     }
 
     private _receiveProgress(reader: BinaryReader) {
         const job = this._currentJobs.get(reader.readBytes(16).toString('ascii'));
-        if (job == null) throw new Error('Invalid job ID: ' + job);
+        if (job == null) return;
         job._receiveProgress(reader);
     }
 
@@ -129,12 +131,6 @@ class Node {
         this.sendPacket(writer.toBuffer());
     }
 
-    public sendStart() {
-        const writer = new BinaryWriter();
-        writer.writeUInt32(ServerClientPackets.START);
-        this.sendPacket(writer.toBuffer());
-    }
-
     public _runningJob(job: Job) {
         this._currentJobs.set(job.id.toString('ascii'), job);
         this._waitingCount--;
@@ -147,6 +143,14 @@ class Node {
         writer.writeUInt32(buffer.length + 8);
         writer.writeBytes(buffer);
         this._socket.write(writer.toBuffer());
+    }
+
+    public _jobCancelled(job: Job) {
+        this._currentJobs.delete(job.id.toString('ascii'));
+
+        if (this._currentJobs.size === 0) {
+            this._setState(this._waitingCount > 0 ? NodeState.WAITING : NodeState.IDLE);
+        }
     }
 }
 

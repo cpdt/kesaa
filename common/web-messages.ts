@@ -2,8 +2,12 @@ import { NodeState } from "./node-state";
 import { JobState } from "./job-state";
 import { WebState } from "./web-state";
 
-export interface ConnectData {
+export interface ClientData {
     ip: string;
+}
+
+export interface ClientListData {
+    clients: ClientData[];
 }
 
 export interface SetupData {
@@ -17,10 +21,30 @@ export interface SetupData {
 
 export interface StateData {
     state: WebState;
-    data: SetupData | null;
 }
 
-export interface UpdateDataClient {
+export interface IntervalRenderData {
+    totalProgress: number;
+    remainingSeconds: number;
+    clients: string[];
+}
+
+export interface JobRenderData {
+    state: JobState;
+    progress: number;
+    image?: Buffer;
+}
+
+export interface JobUpdateData extends JobRenderData {
+    id: number;
+}
+
+export interface FullRenderData extends IntervalRenderData {
+    jobs: JobRenderData[];
+    setup: SetupData;
+}
+
+/*export interface UpdateDataClient {
     ip: string;
     state: NodeState;
     currentX: number;
@@ -34,6 +58,8 @@ export interface UpdateDataJob {
 }
 
 export interface UpdateData {
+    totalProgress: number;
+    remainingSeconds: number;
     clients: UpdateDataClient[];
     jobs?: UpdateDataJob[];
 }
@@ -50,4 +76,4 @@ export interface SetJobImageData {
 
 export interface SaveImageData {
     buffer: Buffer;
-}
+}*/

@@ -4,7 +4,6 @@ export const REVERSE_JOIN_PORT = 8283;
 
 export enum ServerClientPackets {
     INIT,
-    START,
     SEND,
     CANCEL
 }

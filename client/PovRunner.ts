@@ -16,6 +16,8 @@ export class PovRunner implements JobRunner {
     run(params: JobRunnerParams, progress: (val: number) => void, done: (state: ReturnState) => void): void {
         this._running = true;
 
+        console.log("Filename: " + params.filename);
+        console.log("JOB ID: " + params.jobId);
         const outPath = path.join(path.dirname(params.filename), params.jobId) + ".png";
         const args = [
             "+I" + params.filename,                         // pov file to load
@@ -85,6 +87,7 @@ export class PovRunner implements JobRunner {
         if (!this._running) return;
         this._running = false;
         this._povProcess.kill();
+        this._node.borrow();
     }
 
 }

@@ -19,8 +19,6 @@ interface JobData {
 class Node {
     private _lastBuffer: Buffer = new Buffer(0);
     private _currentJobs: Map<string, JobData> = new Map<string, JobData>();
-    private _startQueue: number = 0;
-    private _hasStarted: boolean = false;
     private _init: InitData;
     private _filename: string;
 
@@ -45,9 +43,6 @@ class Node {
         switch (messageType) {
             case ServerClientPackets.INIT:
                 this._socketInit(reader);
-                break;
-            case ServerClientPackets.START:
-                this._socketStart(reader);
                 break;
             case ServerClientPackets.SEND:
                 this._socketSend(reader);
@@ -80,15 +75,6 @@ class Node {
         mkdirp.sync(sourceDir);
         this._filename = sourceDir + uuidv4() + ".pov";
         writeFileSync(this._filename, sourceText);
-    }
-
-    private _socketStart(reader: BinaryReader) {
-        console.log('Received start signal, sending ' + this._startQueue + ' borrow requests');
-
-        this._hasStarted = true;
-        for (let i = 0; i < this._startQueue; i++) {
-            this.borrow();
-        }
     }
 
     private _socketSend(reader: BinaryReader) {
@@ -177,11 +163,6 @@ class Node {
     }
 
     public borrow() {
-        if (!this._hasStarted) {
-            this._startQueue++;
-            return;
-        }
-
         const writer = new BinaryWriter();
         writer.writeUInt32(ClientServerPackets.BORROW);
         this._sendPacket(writer.toBuffer());

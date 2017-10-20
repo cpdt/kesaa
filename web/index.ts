@@ -1,19 +1,18 @@
 import { connect } from 'socket.io-client';
 import Socket = SocketIOClient.Socket;
+import { Rect } from "../common/Rect";
 import {
-    SetupData, ConnectData, UpdateData,
-    StateData, UpdateDataJob, UpdateJobData, SetJobImageData, SaveImageData
-} from '../common/web-messages';
-import { NodeState } from '../common/node-state';
-import { JobState } from '../common/job-state';
-import { WebState } from '../common/web-state';
-import {Rect} from "../common/Rect";
+    ClientListData, FullRenderData, IntervalRenderData, JobRenderData,
+    JobUpdateData, ClientData, StateData, SetupData,
+} from "../common/web-messages";
+import {WebState} from "../common/web-state";
+import {JobState} from "../common/job-state";
 
 interface PreviewBox {
     $mainElt: HTMLElement,
     $progressElt: HTMLElement,
     $displayElt: HTMLElement,
-    $showImage?: HTMLImageElement,
+    $showImage: HTMLImageElement,
     rect: Rect
 }
 
@@ -41,6 +40,8 @@ const $clientNum = document.getElementById('clientNum') as HTMLElement;
 const $sizeNum = document.getElementById('sizeNum') as HTMLElement;
 
 const $renderPreview = document.getElementById('renderPreview') as HTMLElement;
+const $progressBg = document.getElementById('progressBg') as HTMLElement;
+const $progressText = document.getElementById('progressText') as HTMLElement;
 
 const $clientStatus = document.getElementById('clientStatus') as HTMLElement;
 const $renderStart = document.getElementById('renderStart') as HTMLLinkElement;
@@ -49,106 +50,144 @@ const $renderSave = document.getElementById('renderSave') as HTMLLinkElement;
 const $renderReturn = document.getElementById('renderReturn') as HTMLLinkElement;
 
 const socket: Socket = connect();
-const displayBoxes: PreviewBox[] = [];
 let clientCount: number = 0;
-
-let imageData: SetupData | undefined;
-let currentState = WebState.SETUP;
-let needsUiRebuild = true;
-
-socket.on('connected', () => {
-    $addClientInput.style.display = '';
-    $setupContinueBtn.style.display = '';
-});
-
-socket.on('add', (data: ConnectData) => {
-    const newElt = document.createElement('p');
-    newElt.textContent = data.ip;
-    $connectedClients.insertBefore(newElt, $addClientInput);
-    clientCount++;
-});
+let previewBoxes: PreviewBox[] = [];
+let currentWidth: number = 0, currentHeight: number = 0;
 
 socket.on('state', (data: StateData) => {
-    if (data.state === currentState) return;
-
-    switch (currentState) {
-        case WebState.SETUP:
-            $setupPane.style.display = 'none';
-            break;
-        case WebState.WAITING:
-            $renderPane.style.display = 'none';
-            break;
-        case WebState.RENDER:
-            $renderPane.style.display = 'none';
-            $renderCancel.style.display = 'none';
-            break;
-        case WebState.FINISHED:
-            $renderSave.style.display = 'none';
-            $renderReturn.style.display = 'none';
-            break;
-    }
-
     switch (data.state) {
         case WebState.SETUP:
-            clearPreviewUi();
             $setupPane.style.display = '';
+            $renderPane.style.display = 'none';
+            $addClientInput.style.display = '';
+            $setupContinueBtn.style.display = '';
             break;
         case WebState.WAITING:
-            if (data.data) {
-                buildPreviewUi(data.data);
-            }
+            $setupPane.style.display = 'none';
             $renderPane.style.display = '';
             $renderStart.style.display = '';
+            $renderCancel.style.display = 'none';
+            $renderSave.style.display = 'none';
+            $renderReturn.style.display = '';
             break;
         case WebState.RENDER:
-            if (data.data) {
-                buildPreviewUi(data.data);
-            }
+            $setupPane.style.display = 'none';
             $renderPane.style.display = '';
             $renderStart.style.display = 'none';
             $renderCancel.style.display = '';
+            $renderSave.style.display = 'none';
+            $renderReturn.style.display = 'none';
             break;
         case WebState.FINISHED:
+            $setupPane.style.display = 'none';
             $renderPane.style.display = '';
+            $renderStart.style.display = 'none';
+            $renderCancel.style.display = 'none';
             $renderSave.style.display = '';
             $renderReturn.style.display = '';
             break;
     }
-
-    currentState = data.state;
 });
 
-socket.on('update', updatePreviewUi);
+socket.on('clientList', (data: ClientListData) => {
+    while ($connectedClients.firstChild) {
+        $connectedClients.removeChild($connectedClients.firstChild);
+    }
 
-socket.on('jobUpdate', (data: UpdateJobData) => {
-    updateIndividualJob(data.index, data.data);
+    for (const client of data.clients) {
+        const newClientBox = document.createElement('p');
+        newClientBox.textContent = client.ip;
+        $connectedClients.appendChild(newClientBox);
+    }
+
+    clientCount = data.clients.length;
 });
 
-socket.on('jobImage', (data: SetJobImageData) => {
-    const displayBox = displayBoxes[data.index];
-    const buffer = new Buffer(data.data);
+socket.on('fullData', (data: FullRenderData) => {
+    updateIntervalData(data);
 
-    displayBox.$mainElt.removeChild(displayBox.$displayElt);
-    displayBox.$mainElt.removeChild(displayBox.$progressElt);
+    currentWidth = data.setup.imageWidth;
+    currentHeight = data.setup.imageHeight;
 
-    const image = document.createElement('img') as HTMLImageElement;
-    image.src = "data:image/png;base64," + buffer.toString('base64');
-    displayBox.$mainElt.appendChild(image);
-    displayBox.$showImage = image;
+    // build the preview UI
+    const boxWidth = data.setup.imageWidth / data.setup.jobColumns;
+    const boxHeight = data.setup.imageHeight / data.setup.jobRows;
+
+    $jobNum.textContent = data.setup.jobColumns * data.setup.jobRows + ' jobs';
+    $clientNum.textContent = clientCount + ' clients';
+    $sizeNum.textContent = boxWidth + 'x' + boxHeight + ' pixels';
+
+    const previewTargetWidth = 1000;
+    const scaleFactor = previewTargetWidth / data.setup.imageWidth;
+    const displayWidth = boxWidth * scaleFactor;
+    const displayHeight = boxHeight * scaleFactor;
+
+    // remove all rows from parent
+    while ($renderPreview.firstChild) {
+        $renderPreview.removeChild($renderPreview.firstChild);
+    }
+    previewBoxes = [];
+
+    // build new rows
+    for (let y = 0; y < data.setup.jobRows; y++) {
+        const $row = document.createElement('div');
+        $row.classList.add('preview-row');
+        $renderPreview.appendChild($row);
+
+        for (let x = 0; x < data.setup.jobColumns; x++) {
+            const $cell = document.createElement('div');
+            $cell.classList.add('render-cell');
+            $cell.style.width = displayWidth + 'px';
+            $cell.style.height = displayHeight + 'px';
+            $row.appendChild($cell);
+
+            const $previewImage = document.createElement('img') as HTMLImageElement;
+            $previewImage.style.display = 'none';
+            $cell.appendChild($previewImage);
+
+            const $progressBar = document.createElement('div');
+            $progressBar.classList.add('render-progress-bar');
+            $progressBar.style.width = '0%';
+            $cell.appendChild($progressBar);
+
+            const $display = document.createElement('span');
+            $cell.appendChild($display);
+
+            previewBoxes.push({
+                $mainElt: $cell,
+                $showImage: $previewImage,
+                $progressElt: $progressBar,
+                $displayElt: $display,
+                rect: new Rect(x * boxWidth, y * boxHeight, boxWidth, boxHeight)
+            });
+        }
+    }
+
+    for (let i = 0; i < data.jobs.length; i++) {
+        updateJob(i, data.jobs[i]);
+    }
+});
+
+socket.on('intervalData', (data: IntervalRenderData) => {
+    updateIntervalData(data);
+});
+
+socket.on('jobUpdate', (data: JobUpdateData) => {
+    updateJob(data.id, data);
 });
 
 $addClientInput.addEventListener('keypress', (e: KeyboardEvent) => {
     if (e.key !== "Enter") return;
 
-    const connectData: ConnectData = {
-        ip: $addClientInput.value
+    const clientData: ClientData = {
+        ip: $addClientInput.value.trim()
     };
-    socket.emit('add', connectData);
-    $addClientInput.value = "";
+    socket.emit('add', clientData);
+    $addClientInput.value = '';
 });
 
 $setupContinueBtn.addEventListener('click', () => {
-    imageData = {
+    const imageData: SetupData = {
         quality: parseInt($imageQuality.value, 10),
         povSource: $sceneTextInput.value,
         imageWidth: parseInt($imageWidthInput.value, 10),
@@ -156,8 +195,6 @@ $setupContinueBtn.addEventListener('click', () => {
         jobRows: parseInt($jobRowsInput.value, 10),
         jobColumns: parseInt($jobColumnsInput.value, 10)
     };
-
-    buildPreviewUi(imageData);
     socket.emit('setup', imageData);
 });
 
@@ -170,131 +207,68 @@ $renderCancel.addEventListener('click', () => {
 });
 
 $renderSave.addEventListener('click', () => {
-    if (!imageData) return;
-
     const renderCanvas = document.createElement('canvas');
     const renderCtx = renderCanvas.getContext('2d') as CanvasRenderingContext2D;
-    renderCanvas.width = imageData.imageWidth;
-    renderCanvas.height = imageData.imageHeight;
+    renderCanvas.width = currentWidth;
+    renderCanvas.height = currentHeight;
 
-    for (const box of displayBoxes) {
+    for (const box of previewBoxes) {
         if (!box.$showImage) continue;
 
         renderCtx.drawImage(box.$showImage, box.rect.x, box.rect.y, box.rect.width, box.rect.height);
     }
 
-    document.location.href = renderCanvas.toDataURL('image/png');
+    window.open(renderCanvas.toDataURL('image/png'));
 });
 
 $renderReturn.addEventListener('click', () => {
     socket.emit('return');
 });
 
-function clearPreviewUi() {
-    needsUiRebuild = true;
+function updateIntervalData(data: IntervalRenderData) {
+    $clientStatus.textContent = data.clients.join('\n');
 
-    while ($renderPreview.firstChild) {
-        $renderPreview.removeChild($renderPreview.firstChild);
-    }
+    const remainingMinutes = Math.floor(data.remainingSeconds / 60);
+    const remainingSeconds = Math.floor(data.remainingSeconds % 60);
+
+    $progressBg.style.width = data.totalProgress * 100 + '%';
+    $progressText.textContent = (data.totalProgress * 100).toFixed(2) + '% - ' + remainingMinutes + ':' + Math.floor(remainingSeconds);
 }
 
-function buildPreviewUi(setupData: SetupData) {
-    if (!needsUiRebuild) return;
-    needsUiRebuild = false;
+function updateJob(index: number, job: JobRenderData) {
+    if (index > previewBoxes.length) return;
 
-    const boxWidth = setupData.imageWidth / setupData.jobColumns;
-    const boxHeight = setupData.imageHeight / setupData.jobRows;
-
-    $jobNum.textContent = setupData.jobColumns * setupData.jobRows + ' jobs';
-    $clientNum.textContent = clientCount + ' clients';
-    $sizeNum.textContent = boxWidth + 'x' + boxHeight + ' pixels';
-
-    const previewTargetWidth = 1000;
-    const scaleFactor = previewTargetWidth / setupData.imageWidth;
-    const displayWidth = boxWidth * scaleFactor;
-    const displayHeight = boxHeight * scaleFactor;
-
-    for (let y = 0; y < setupData.jobRows; y++) {
-        const $row = document.createElement('div');
-        $row.classList.add('preview-row');
-        $renderPreview.appendChild($row);
-
-        for (let x = 0; x < setupData.jobColumns; x++) {
-            const $cell = document.createElement('div');
-            $cell.classList.add('render-cell');
-            $cell.style.width = displayWidth + 'px';
-            $cell.style.height = displayHeight + 'px';
-            $row.appendChild($cell);
-
-            const $progressBar = document.createElement('div');
-            $progressBar.classList.add('render-progress-bar');
-            $progressBar.style.width = '0%';
-            $cell.appendChild($progressBar);
-
-            const $display = document.createElement('span');
-            $cell.appendChild($display);
-
-            displayBoxes.push({
-                $mainElt: $cell,
-                $progressElt: $progressBar,
-                $displayElt: $display,
-                rect: new Rect(x * boxWidth, y * boxHeight, boxWidth, boxHeight)
-            });
-        }
-    }
-}
-
-function updatePreviewUi(data: UpdateData) {
-    // update client strings
-    let clientString = "";
-    for (const client of data.clients) {
-        clientString += client.ip + " - ";
-        switch (client.state) {
-            case NodeState.IDLE:
-                clientString += 'idle';
-                break;
-            case NodeState.WAITING:
-                clientString += 'waiting';
-                break;
-            case NodeState.RUNNING:
-                clientString += '(' + client.currentX + ', ' + client.currentY + ') at ' + (client.progress * 100).toFixed(2) + '%';
-                break;
-            case NodeState.INVALID:
-                clientString += 'error';
-                break;
-        }
-        clientString += "\n";
-    }
-    $clientStatus.textContent = clientString;
-
-    // update cells
-    if (data.jobs) {
-        for (let i = 0; i < data.jobs.length; i++) {
-            updateIndividualJob(i, data.jobs[i]);
-        }
-    }
-}
-
-function updateIndividualJob(index: number, jobData: UpdateDataJob) {
-    const displayBox = displayBoxes[index];
-
-    switch (jobData.state) {
+    const previewBox = previewBoxes[index];
+    switch (job.state) {
         case JobState.WAITING:
-            displayBox.$displayElt.textContent = "Waiting...";
+            previewBox.$displayElt.textContent = "Waiting...";
             break;
         case JobState.RUNNING:
-            displayBox.$displayElt.textContent = (jobData.progress * 100).toFixed(2) + "%";
+            previewBox.$displayElt.textContent = (job.progress * 100).toFixed(2) + "%";
             break;
         case JobState.COMPLETED:
-            displayBox.$displayElt.textContent = "Done";
+            previewBox.$displayElt.textContent = "Done";
             break;
         case JobState.CANCELLED:
-            displayBox.$displayElt.textContent = "Cancelled";
+            previewBox.$displayElt.textContent = "Cancelled";
             break;
         case JobState.ERROR:
-            displayBox.$displayElt.textContent = "Error!";
+            previewBox.$displayElt.textContent = "Error!";
             break;
     }
 
-    displayBox.$progressElt.style.width = jobData.progress * 100 + '%';
+    previewBox.$progressElt.style.width = job.progress * 100 + "%";
+
+    if (!job.image) {
+        previewBox.$showImage.style.display = 'none';
+        previewBox.$progressElt.style.display = '';
+        previewBox.$displayElt.style.display = '';
+        return;
+    }
+
+    const buffer = new Buffer(job.image);
+    previewBox.$showImage.src = "data:image/png;base64," + buffer.toString('base64');
+    previewBox.$showImage.style.display = '';
+    previewBox.$progressElt.style.display = 'none';
+    previewBox.$displayElt.style.display = 'none';
 }

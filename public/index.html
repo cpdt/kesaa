@@ -102,7 +102,7 @@
             width: 100%;
         }
 
-        #connectedClients {
+        .connected-clients-container {
             background-color: #395168;
             border: solid 1px #476481;
             display: flex;
@@ -110,12 +110,12 @@
             font-family: monospace;
         }
 
-        #connectedClients p {
+        .connected-clients-container p {
             padding: 5px 10px;
             border-bottom: solid 1px #476481;
         }
 
-        #connectedClients input {
+        .connected-clients-container input {
             border: none;
             color: #fff;
             font: inherit;
@@ -182,7 +182,10 @@
         <div class="pane-right">
             <p>Connected clients:</p>
 
-            <div id="connectedClients">
+            <div class="connected-clients-container">
+                <div id="connectedClients">
+
+                </div>
                 <input id="addClient" type="text" placeholder="Add another..." pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$" style="display: none"/>
             </div>
         </div>
@@ -217,6 +220,11 @@
             <a class="big-button" href="#" id="renderSave" style="display: none">Save</a>
             <a class="big-button" href="#" id="renderReturn" style="display: none">Return</a>
         </div>
+    </div>
+
+    <div class="render-cell">
+        <div id="progressBg" class="render-progress-bar"></div>
+        <span id="progressText">50% - 02:00</span>
     </div>
 
 </section>

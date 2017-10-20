@@ -7,8 +7,9 @@ import { InitData } from "../common/InitData";
 class Host extends EventEmitter {
     private _jobQueue: Job[] = [];
     private _waitingNodes: Node[] = [];
-
+    private _isPaused: boolean = true;
     private _connectedNodes: Node[] = [];
+
     public get connectedNodes(): ReadonlyArray<Node> {
         return this._connectedNodes;
     }
@@ -52,7 +53,7 @@ class Host extends EventEmitter {
     public addJob(job: Job): void {
         this._iOnJobQueued(job);
 
-        if (!this._waitingNodes.length) {
+        if (this._isPaused || !this._waitingNodes.length) {
             console.log('[job] ' + job.stringId + ' queueing');
             this._jobQueue.push(job);
             return;
@@ -81,14 +82,31 @@ class Host extends EventEmitter {
         }
     }
 
-    public sendStart() {
-        for (const node of this._connectedNodes) {
-            node.sendStart();
+    public start() {
+        this._isPaused = false;
+
+        // no point requesting borrows if job queue is empty
+        if (this._jobQueue.length) {
+            const oldWaitingNodes = this._waitingNodes;
+            this._waitingNodes = [];
+            for (const node of oldWaitingNodes) {
+                this._requestBorrow(node);
+            }
         }
     }
 
+    public pause() {
+        this._isPaused = true;
+    }
+
+    public reset() {
+        this.pause();
+        this._jobQueue = [];
+        // todo?
+    }
+
     public _requestBorrow(node: Node): void {
-        if (this._jobQueue.length === 0) {
+        if (this._isPaused || this._jobQueue.length === 0) {
             this._waitingNodes.push(node);
             return;
         }

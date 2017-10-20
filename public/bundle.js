@@ -3348,10 +3348,9 @@ module.exports = function(obj, fn){
 /* WEBPACK VAR INJECTION */(function(Buffer) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const socket_io_client_1 = __webpack_require__(26);
-const node_state_1 = __webpack_require__(48);
-const job_state_1 = __webpack_require__(49);
-const web_state_1 = __webpack_require__(50);
-const Rect_1 = __webpack_require__(51);
+const Rect_1 = __webpack_require__(48);
+const web_state_1 = __webpack_require__(49);
+const job_state_1 = __webpack_require__(50);
 // grab all elements that we need
 const $setupPane = document.getElementById('setupPane');
 const $renderPane = document.getElementById('renderPane');
@@ -3370,99 +3369,131 @@ const $jobNum = document.getElementById('jobNum');
 const $clientNum = document.getElementById('clientNum');
 const $sizeNum = document.getElementById('sizeNum');
 const $renderPreview = document.getElementById('renderPreview');
+const $progressBg = document.getElementById('progressBg');
+const $progressText = document.getElementById('progressText');
 const $clientStatus = document.getElementById('clientStatus');
 const $renderStart = document.getElementById('renderStart');
 const $renderCancel = document.getElementById('renderCancel');
 const $renderSave = document.getElementById('renderSave');
 const $renderReturn = document.getElementById('renderReturn');
 const socket = socket_io_client_1.connect();
-const displayBoxes = [];
 let clientCount = 0;
-let imageData;
-let currentState = web_state_1.WebState.SETUP;
-let needsUiRebuild = true;
-socket.on('connected', () => {
-    $addClientInput.style.display = '';
-    $setupContinueBtn.style.display = '';
-});
-socket.on('add', (data) => {
-    const newElt = document.createElement('p');
-    newElt.textContent = data.ip;
-    $connectedClients.insertBefore(newElt, $addClientInput);
-    clientCount++;
-});
+let previewBoxes = [];
+let currentWidth = 0, currentHeight = 0;
 socket.on('state', (data) => {
-    if (data.state === currentState)
-        return;
-    switch (currentState) {
-        case web_state_1.WebState.SETUP:
-            $setupPane.style.display = 'none';
-            break;
-        case web_state_1.WebState.WAITING:
-            $renderPane.style.display = 'none';
-            break;
-        case web_state_1.WebState.RENDER:
-            $renderPane.style.display = 'none';
-            $renderCancel.style.display = 'none';
-            break;
-        case web_state_1.WebState.FINISHED:
-            $renderSave.style.display = 'none';
-            $renderReturn.style.display = 'none';
-            break;
-    }
     switch (data.state) {
         case web_state_1.WebState.SETUP:
-            clearPreviewUi();
             $setupPane.style.display = '';
+            $renderPane.style.display = 'none';
+            $addClientInput.style.display = '';
+            $setupContinueBtn.style.display = '';
             break;
         case web_state_1.WebState.WAITING:
-            if (data.data) {
-                buildPreviewUi(data.data);
-            }
+            $setupPane.style.display = 'none';
             $renderPane.style.display = '';
             $renderStart.style.display = '';
+            $renderCancel.style.display = 'none';
+            $renderSave.style.display = 'none';
+            $renderReturn.style.display = '';
             break;
         case web_state_1.WebState.RENDER:
-            if (data.data) {
-                buildPreviewUi(data.data);
-            }
+            $setupPane.style.display = 'none';
             $renderPane.style.display = '';
             $renderStart.style.display = 'none';
             $renderCancel.style.display = '';
+            $renderSave.style.display = 'none';
+            $renderReturn.style.display = 'none';
             break;
         case web_state_1.WebState.FINISHED:
+            $setupPane.style.display = 'none';
             $renderPane.style.display = '';
+            $renderStart.style.display = 'none';
+            $renderCancel.style.display = 'none';
             $renderSave.style.display = '';
             $renderReturn.style.display = '';
             break;
     }
-    currentState = data.state;
 });
-socket.on('update', updatePreviewUi);
+socket.on('clientList', (data) => {
+    while ($connectedClients.firstChild) {
+        $connectedClients.removeChild($connectedClients.firstChild);
+    }
+    for (const client of data.clients) {
+        const newClientBox = document.createElement('p');
+        newClientBox.textContent = client.ip;
+        $connectedClients.appendChild(newClientBox);
+    }
+    clientCount = data.clients.length;
+});
+socket.on('fullData', (data) => {
+    updateIntervalData(data);
+    currentWidth = data.setup.imageWidth;
+    currentHeight = data.setup.imageHeight;
+    // build the preview UI
+    const boxWidth = data.setup.imageWidth / data.setup.jobColumns;
+    const boxHeight = data.setup.imageHeight / data.setup.jobRows;
+    $jobNum.textContent = data.setup.jobColumns * data.setup.jobRows + ' jobs';
+    $clientNum.textContent = clientCount + ' clients';
+    $sizeNum.textContent = boxWidth + 'x' + boxHeight + ' pixels';
+    const previewTargetWidth = 1000;
+    const scaleFactor = previewTargetWidth / data.setup.imageWidth;
+    const displayWidth = boxWidth * scaleFactor;
+    const displayHeight = boxHeight * scaleFactor;
+    // remove all rows from parent
+    while ($renderPreview.firstChild) {
+        $renderPreview.removeChild($renderPreview.firstChild);
+    }
+    previewBoxes = [];
+    // build new rows
+    for (let y = 0; y < data.setup.jobRows; y++) {
+        const $row = document.createElement('div');
+        $row.classList.add('preview-row');
+        $renderPreview.appendChild($row);
+        for (let x = 0; x < data.setup.jobColumns; x++) {
+            const $cell = document.createElement('div');
+            $cell.classList.add('render-cell');
+            $cell.style.width = displayWidth + 'px';
+            $cell.style.height = displayHeight + 'px';
+            $row.appendChild($cell);
+            const $previewImage = document.createElement('img');
+            $previewImage.style.display = 'none';
+            $cell.appendChild($previewImage);
+            const $progressBar = document.createElement('div');
+            $progressBar.classList.add('render-progress-bar');
+            $progressBar.style.width = '0%';
+            $cell.appendChild($progressBar);
+            const $display = document.createElement('span');
+            $cell.appendChild($display);
+            previewBoxes.push({
+                $mainElt: $cell,
+                $showImage: $previewImage,
+                $progressElt: $progressBar,
+                $displayElt: $display,
+                rect: new Rect_1.Rect(x * boxWidth, y * boxHeight, boxWidth, boxHeight)
+            });
+        }
+    }
+    for (let i = 0; i < data.jobs.length; i++) {
+        updateJob(i, data.jobs[i]);
+    }
+});
+socket.on('intervalData', (data) => {
+    updateIntervalData(data);
+});
 socket.on('jobUpdate', (data) => {
-    updateIndividualJob(data.index, data.data);
-});
-socket.on('jobImage', (data) => {
-    const displayBox = displayBoxes[data.index];
-    const buffer = new Buffer(data.data);
-    displayBox.$mainElt.removeChild(displayBox.$displayElt);
-    displayBox.$mainElt.removeChild(displayBox.$progressElt);
-    const image = document.createElement('img');
-    image.src = "data:image/png;base64," + buffer.toString('base64');
-    displayBox.$mainElt.appendChild(image);
-    displayBox.$showImage = image;
+    updateJob(data.id, data);
 });
 $addClientInput.addEventListener('keypress', (e) => {
     if (e.key !== "Enter")
         return;
-    const connectData = {
-        ip: $addClientInput.value
+    const clientData = {
+        ip: $addClientInput.value.trim()
     };
-    socket.emit('add', connectData);
-    $addClientInput.value = "";
+    socket.emit('add', clientData);
+    $addClientInput.value = '';
 });
 $setupContinueBtn.addEventListener('click', () => {
-    imageData = {
+    const imageData = {
         quality: parseInt($imageQuality.value, 10),
         povSource: $sceneTextInput.value,
         imageWidth: parseInt($imageWidthInput.value, 10),
@@ -3470,7 +3501,6 @@ $setupContinueBtn.addEventListener('click', () => {
         jobRows: parseInt($jobRowsInput.value, 10),
         jobColumns: parseInt($jobColumnsInput.value, 10)
     };
-    buildPreviewUi(imageData);
     socket.emit('setup', imageData);
 });
 $renderStart.addEventListener('click', () => {
@@ -3480,88 +3510,287 @@ $renderCancel.addEventListener('click', () => {
     socket.emit('cancel');
 });
 $renderSave.addEventListener('click', () => {
-    if (!imageData)
-        return;
     const renderCanvas = document.createElement('canvas');
     const renderCtx = renderCanvas.getContext('2d');
-    renderCanvas.width = imageData.imageWidth;
-    renderCanvas.height = imageData.imageHeight;
-    for (const box of displayBoxes) {
+    renderCanvas.width = currentWidth;
+    renderCanvas.height = currentHeight;
+    for (const box of previewBoxes) {
         if (!box.$showImage)
             continue;
         renderCtx.drawImage(box.$showImage, box.rect.x, box.rect.y, box.rect.width, box.rect.height);
     }
-    document.location.href = renderCanvas.toDataURL('image/png');
+    window.open(renderCanvas.toDataURL('image/png'));
 });
 $renderReturn.addEventListener('click', () => {
     socket.emit('return');
 });
+function updateIntervalData(data) {
+    $clientStatus.textContent = data.clients.join('\n');
+    const remainingMinutes = Math.floor(data.remainingSeconds / 60);
+    const remainingSeconds = Math.floor(data.remainingSeconds % 60);
+    $progressBg.style.width = data.totalProgress * 100 + '%';
+    $progressText.textContent = (data.totalProgress * 100).toFixed(2) + '% - ' + remainingMinutes + ':' + Math.floor(remainingSeconds);
+}
+function updateJob(index, job) {
+    if (index > previewBoxes.length)
+        return;
+    const previewBox = previewBoxes[index];
+    switch (job.state) {
+        case job_state_1.JobState.WAITING:
+            previewBox.$displayElt.textContent = "Waiting...";
+            break;
+        case job_state_1.JobState.RUNNING:
+            previewBox.$displayElt.textContent = (job.progress * 100).toFixed(2) + "%";
+            break;
+        case job_state_1.JobState.COMPLETED:
+            previewBox.$displayElt.textContent = "Done";
+            break;
+        case job_state_1.JobState.CANCELLED:
+            previewBox.$displayElt.textContent = "Cancelled";
+            break;
+        case job_state_1.JobState.ERROR:
+            previewBox.$displayElt.textContent = "Error!";
+            break;
+    }
+    previewBox.$progressElt.style.width = job.progress * 100 + "%";
+    if (!job.image) {
+        previewBox.$showImage.style.display = 'none';
+        previewBox.$progressElt.style.display = '';
+        previewBox.$displayElt.style.display = '';
+        return;
+    }
+    const buffer = new Buffer(job.image);
+    previewBox.$showImage.src = "data:image/png;base64," + buffer.toString('base64');
+    previewBox.$showImage.style.display = '';
+    previewBox.$progressElt.style.display = 'none';
+    previewBox.$displayElt.style.display = 'none';
+}
+/*const socket: Socket = connect();
+const displayBoxes: PreviewBox[] = [];
+let clientCount: number = 0;
+
+let imageData: SetupData | undefined;
+let currentState = WebState.SETUP;
+let needsUiRebuild = true;
+
+socket.on('connected', () => {
+    $addClientInput.style.display = '';
+    $setupContinueBtn.style.display = '';
+});
+
+socket.on('add', (data: ConnectData) => {
+    const newElt = document.createElement('p');
+    newElt.textContent = data.ip;
+    $connectedClients.insertBefore(newElt, $addClientInput);
+    clientCount++;
+});
+
+socket.on('state', (data: StateData) => {
+    if (data.state === currentState) return;
+
+    switch (currentState) {
+        case WebState.SETUP:
+            $setupPane.style.display = 'none';
+            break;
+        case WebState.WAITING:
+            $renderPane.style.display = 'none';
+            break;
+        case WebState.RENDER:
+            $renderPane.style.display = 'none';
+            $renderCancel.style.display = 'none';
+            break;
+        case WebState.FINISHED:
+            $renderSave.style.display = 'none';
+            $renderReturn.style.display = 'none';
+            break;
+    }
+
+    switch (data.state) {
+        case WebState.SETUP:
+            clearPreviewUi();
+            $setupPane.style.display = '';
+            break;
+        case WebState.WAITING:
+            if (data.data) {
+                buildPreviewUi(data.data);
+            }
+            $renderPane.style.display = '';
+            $renderStart.style.display = '';
+            break;
+        case WebState.RENDER:
+            if (data.data) {
+                buildPreviewUi(data.data);
+            }
+            $renderPane.style.display = '';
+            $renderStart.style.display = 'none';
+            $renderCancel.style.display = '';
+            break;
+        case WebState.FINISHED:
+            $renderPane.style.display = '';
+            $renderSave.style.display = '';
+            $renderReturn.style.display = '';
+            break;
+    }
+
+    currentState = data.state;
+});
+
+socket.on('update', updatePreviewUi);
+
+socket.on('jobUpdate', (data: UpdateJobData) => {
+    updateIndividualJob(data.index, data.data);
+});
+
+socket.on('jobImage', (data: SetJobImageData) => {
+    const displayBox = displayBoxes[data.index];
+    const buffer = new Buffer(data.data);
+
+    displayBox.$mainElt.removeChild(displayBox.$displayElt);
+    displayBox.$mainElt.removeChild(displayBox.$progressElt);
+
+    const image = document.createElement('img') as HTMLImageElement;
+    image.src = "data:image/png;base64," + buffer.toString('base64');
+    displayBox.$mainElt.appendChild(image);
+    displayBox.$showImage = image;
+});
+
+$addClientInput.addEventListener('keypress', (e: KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+
+    const connectData: ConnectData = {
+        ip: $addClientInput.value
+    };
+    socket.emit('add', connectData);
+    $addClientInput.value = "";
+});
+
+$setupContinueBtn.addEventListener('click', () => {
+    imageData = {
+        quality: parseInt($imageQuality.value, 10),
+        povSource: $sceneTextInput.value,
+        imageWidth: parseInt($imageWidthInput.value, 10),
+        imageHeight: parseInt($imageHeightInput.value, 10),
+        jobRows: parseInt($jobRowsInput.value, 10),
+        jobColumns: parseInt($jobColumnsInput.value, 10)
+    };
+
+    buildPreviewUi(imageData);
+    socket.emit('setup', imageData);
+});
+
+$renderStart.addEventListener('click', () => {
+    socket.emit('start');
+});
+
+$renderCancel.addEventListener('click', () => {
+    socket.emit('cancel');
+});
+
+$renderSave.addEventListener('click', () => {
+    if (!imageData) return;
+
+    const renderCanvas = document.createElement('canvas');
+    const renderCtx = renderCanvas.getContext('2d') as CanvasRenderingContext2D;
+    renderCanvas.width = imageData.imageWidth;
+    renderCanvas.height = imageData.imageHeight;
+
+    for (const box of displayBoxes) {
+        if (!box.$showImage) continue;
+
+        renderCtx.drawImage(box.$showImage, box.rect.x, box.rect.y, box.rect.width, box.rect.height);
+    }
+
+    window.open(renderCanvas.toDataURL('image/png'));
+});
+
+$renderReturn.addEventListener('click', () => {
+    socket.emit('return');
+});
+
 function clearPreviewUi() {
     needsUiRebuild = true;
+
     while ($renderPreview.firstChild) {
         $renderPreview.removeChild($renderPreview.firstChild);
     }
 }
-function buildPreviewUi(setupData) {
-    if (!needsUiRebuild)
-        return;
+
+function buildPreviewUi(setupData: SetupData) {
+    if (!needsUiRebuild) return;
     needsUiRebuild = false;
+
     const boxWidth = setupData.imageWidth / setupData.jobColumns;
     const boxHeight = setupData.imageHeight / setupData.jobRows;
+
     $jobNum.textContent = setupData.jobColumns * setupData.jobRows + ' jobs';
     $clientNum.textContent = clientCount + ' clients';
     $sizeNum.textContent = boxWidth + 'x' + boxHeight + ' pixels';
+
     const previewTargetWidth = 1000;
     const scaleFactor = previewTargetWidth / setupData.imageWidth;
     const displayWidth = boxWidth * scaleFactor;
     const displayHeight = boxHeight * scaleFactor;
+
     for (let y = 0; y < setupData.jobRows; y++) {
         const $row = document.createElement('div');
         $row.classList.add('preview-row');
         $renderPreview.appendChild($row);
+
         for (let x = 0; x < setupData.jobColumns; x++) {
             const $cell = document.createElement('div');
             $cell.classList.add('render-cell');
             $cell.style.width = displayWidth + 'px';
             $cell.style.height = displayHeight + 'px';
             $row.appendChild($cell);
+
             const $progressBar = document.createElement('div');
             $progressBar.classList.add('render-progress-bar');
             $progressBar.style.width = '0%';
             $cell.appendChild($progressBar);
+
             const $display = document.createElement('span');
             $cell.appendChild($display);
+
             displayBoxes.push({
                 $mainElt: $cell,
                 $progressElt: $progressBar,
                 $displayElt: $display,
-                rect: new Rect_1.Rect(x * boxWidth, y * boxHeight, boxWidth, boxHeight)
+                rect: new Rect(x * boxWidth, y * boxHeight, boxWidth, boxHeight)
             });
         }
     }
 }
-function updatePreviewUi(data) {
+
+function updatePreviewUi(data: UpdateData) {
     // update client strings
     let clientString = "";
     for (const client of data.clients) {
         clientString += client.ip + " - ";
         switch (client.state) {
-            case node_state_1.NodeState.IDLE:
+            case NodeState.IDLE:
                 clientString += 'idle';
                 break;
-            case node_state_1.NodeState.WAITING:
+            case NodeState.WAITING:
                 clientString += 'waiting';
                 break;
-            case node_state_1.NodeState.RUNNING:
+            case NodeState.RUNNING:
                 clientString += '(' + client.currentX + ', ' + client.currentY + ') at ' + (client.progress * 100).toFixed(2) + '%';
                 break;
-            case node_state_1.NodeState.INVALID:
+            case NodeState.INVALID:
                 clientString += 'error';
                 break;
         }
         clientString += "\n";
     }
     $clientStatus.textContent = clientString;
+
+    // update overall progress
+    const remainingMinutes = Math.floor(data.remainingSeconds / 60);
+    const remainingSeconds = data.remainingSeconds % 60;
+
+    $progressBg.style.width = data.totalProgress * 100 + '%';
+    $progressText.textContent = (data.totalProgress * 100).toFixed(2) + '% - ' + remainingMinutes + ':' + Math.floor(remainingSeconds);
+
     // update cells
     if (data.jobs) {
         for (let i = 0; i < data.jobs.length; i++) {
@@ -3569,27 +3798,30 @@ function updatePreviewUi(data) {
         }
     }
 }
-function updateIndividualJob(index, jobData) {
+
+function updateIndividualJob(index: number, jobData: UpdateDataJob) {
     const displayBox = displayBoxes[index];
+
     switch (jobData.state) {
-        case job_state_1.JobState.WAITING:
+        case JobState.WAITING:
             displayBox.$displayElt.textContent = "Waiting...";
             break;
-        case job_state_1.JobState.RUNNING:
+        case JobState.RUNNING:
             displayBox.$displayElt.textContent = (jobData.progress * 100).toFixed(2) + "%";
             break;
-        case job_state_1.JobState.COMPLETED:
+        case JobState.COMPLETED:
             displayBox.$displayElt.textContent = "Done";
             break;
-        case job_state_1.JobState.CANCELLED:
+        case JobState.CANCELLED:
             displayBox.$displayElt.textContent = "Cancelled";
             break;
-        case job_state_1.JobState.ERROR:
+        case JobState.ERROR:
             displayBox.$displayElt.textContent = "Error!";
             break;
     }
+
     displayBox.$progressElt.style.width = jobData.progress * 100 + '%';
-}
+}*/
 
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(22).Buffer))
 
@@ -8920,55 +9152,6 @@ Backoff.prototype.setJitter = function(jitter){
 "use strict";
 
 Object.defineProperty(exports, "__esModule", { value: true });
-var NodeState;
-(function (NodeState) {
-    NodeState[NodeState["IDLE"] = 0] = "IDLE";
-    NodeState[NodeState["WAITING"] = 1] = "WAITING";
-    NodeState[NodeState["RUNNING"] = 2] = "RUNNING";
-    NodeState[NodeState["INVALID"] = 3] = "INVALID";
-})(NodeState = exports.NodeState || (exports.NodeState = {}));
-
-
-/***/ }),
-/* 49 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", { value: true });
-var JobState;
-(function (JobState) {
-    JobState[JobState["WAITING"] = 0] = "WAITING";
-    JobState[JobState["RUNNING"] = 1] = "RUNNING";
-    JobState[JobState["COMPLETED"] = 2] = "COMPLETED";
-    JobState[JobState["CANCELLED"] = 3] = "CANCELLED";
-    JobState[JobState["ERROR"] = 4] = "ERROR";
-})(JobState = exports.JobState || (exports.JobState = {}));
-
-
-/***/ }),
-/* 50 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", { value: true });
-var WebState;
-(function (WebState) {
-    WebState[WebState["SETUP"] = 0] = "SETUP";
-    WebState[WebState["WAITING"] = 1] = "WAITING";
-    WebState[WebState["RENDER"] = 2] = "RENDER";
-    WebState[WebState["FINISHED"] = 3] = "FINISHED";
-})(WebState = exports.WebState || (exports.WebState = {}));
-
-
-/***/ }),
-/* 51 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", { value: true });
 class Rect {
     constructor(_x, _y, _width, _height) {
         this._x = _x;
@@ -8991,6 +9174,39 @@ class Rect {
     }
 }
 exports.Rect = Rect;
+
+
+/***/ }),
+/* 49 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+var WebState;
+(function (WebState) {
+    WebState[WebState["SETUP"] = 0] = "SETUP";
+    WebState[WebState["WAITING"] = 1] = "WAITING";
+    WebState[WebState["RENDER"] = 2] = "RENDER";
+    WebState[WebState["FINISHED"] = 3] = "FINISHED";
+})(WebState = exports.WebState || (exports.WebState = {}));
+
+
+/***/ }),
+/* 50 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+var JobState;
+(function (JobState) {
+    JobState[JobState["WAITING"] = 0] = "WAITING";
+    JobState[JobState["RUNNING"] = 1] = "RUNNING";
+    JobState[JobState["COMPLETED"] = 2] = "COMPLETED";
+    JobState[JobState["CANCELLED"] = 3] = "CANCELLED";
+    JobState[JobState["ERROR"] = 4] = "ERROR";
+})(JobState = exports.JobState || (exports.JobState = {}));
 
 
 /***/ })

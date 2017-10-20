@@ -106,6 +106,9 @@ class Job extends EventEmitter {
     public cancel(): void {
         this._iCancel();
         this._setState(JobState.CANCELLED);
+        if (this.node) {
+            this.node._jobCancelled(this);
+        }
     }
 
     public _receiveReturn(reader: BinaryReader) {
