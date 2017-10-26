@@ -1,13 +1,13 @@
 {
   "name": "kesaa",
   "version": "1.0.0",
-  "description": "",
+  "description": "A distributed POV-Ray system",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Tom Barham <copodt@gmail.com>",
+  "license": "MIT",
   "dependencies": {
     "@types/mkdirp": "^0.5.1",
     "@types/sharp": "^0.17.4",
